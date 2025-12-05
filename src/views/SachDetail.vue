@@ -67,7 +67,7 @@
                     </p>
                     <p class="text-muted mb-2">
                       <i class="fas fa-copy me-2"></i>
-                      <strong>Số quyển có sẵn:</strong>
+                      <strong>Số quyển có sẵn: </strong>
                       <span
                         :class="{
                           'text-success': book.SoQuyen > 0,

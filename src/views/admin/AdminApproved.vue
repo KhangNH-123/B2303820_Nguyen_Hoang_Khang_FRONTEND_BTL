@@ -12,14 +12,16 @@
         </div>
       </div>
 
-      <div v-if="debugInfo" class="alert alert-info">
+      <!-- Debug info (có thể bật/tắt bằng cách thay đổi debugInfo.value) -->
+      <!-- <div v-if="debugInfo" class="alert alert-info">
         <h6><i class="fas fa-bug me-2"></i>Debug Information</h6>
         <p class="mb-1">
           <strong>Total Records:</strong> {{ approvedRequests.length }}
         </p>
         <p class="mb-1"><strong>Loading:</strong> {{ loading }}</p>
         <p class="mb-0"><strong>Error:</strong> {{ error }}</p>
-      </div>
+        <pre>{{ approvedRequests }}</pre>
+      </div> -->
 
       <div v-if="loading" class="text-center py-5">
         <div class="spinner-border text-primary" role="status">
@@ -62,7 +64,8 @@
                 Lịch sử đã duyệt ({{ approvedRequests.length }})
                 <small class="d-block mt-1 fs-6 fw-normal">
                   Bao gồm: {{ getCountByStatus("approved") }} đang mượn •
-                  {{ getCountByStatus("returned") }} đã trả
+                  {{ getCountByStatus("returned") }} đã trả •
+                  {{ getCountByStatus("overdue") }} quá hạn
                 </small>
               </h5>
             </div>
@@ -110,12 +113,45 @@
                       </td>
                       <td>
                         {{ formatDate(request.NgayTraDuKien) }}
+                        <div
+                          v-if="isOverdue(request)"
+                          class="text-danger small"
+                        >
+                          <i class="fas fa-exclamation-triangle me-1"></i>Quá
+                          hạn
+                        </div>
                       </td>
                       <td>
-                        <span class="badge bg-success">Đang mượn</span>
+                        <!-- Hiển thị trạng thái dựa trên request.status -->
+                        <span
+                          v-if="request.status === 'returned'"
+                          class="badge bg-secondary"
+                        >
+                          <i class="fas fa-check-circle me-1"></i>Đã trả
+                        </span>
+                        <span
+                          v-else-if="request.status === 'overdue'"
+                          class="badge bg-danger"
+                        >
+                          <i class="fas fa-exclamation-triangle me-1"></i>Quá
+                          hạn
+                        </span>
+                        <span v-else class="badge bg-success">
+                          <i class="fas fa-book me-1"></i>Đang mượn
+                        </span>
+
+                        <!-- Hiển thị ngày trả thực tế nếu có -->
+                        <div
+                          v-if="request.NgayTraThucTe"
+                          class="small text-muted mt-1"
+                        >
+                          Trả: {{ formatDate(request.NgayTraThucTe) }}
+                        </div>
                       </td>
                       <td>
+                        <!-- Chỉ hiển thị nút "Đánh dấu đã trả" khi sách chưa trả -->
                         <button
+                          v-if="request.status !== 'returned'"
                           @click="markAsReturned(request._id)"
                           class="btn btn-info btn-sm"
                           :disabled="processingRequest === request._id"
@@ -126,6 +162,10 @@
                           ></span>
                           <i class="fas fa-undo me-1"></i>Đánh dấu đã trả
                         </button>
+                        <span v-else class="text-muted">
+                          <i class="fas fa-check-circle text-success me-1"></i
+                          >Đã trả
+                        </span>
                       </td>
                     </tr>
                   </tbody>
@@ -150,11 +190,20 @@ const approvedRequests = ref([]);
 const loading = ref(false);
 const error = ref("");
 const processingRequest = ref("");
-const debugInfo = ref(true);
+const debugInfo = ref(false); // Tắt debug mặc định
 
 const getCountByStatus = (status) => {
   return approvedRequests.value.filter((request) => request.status === status)
     .length;
+};
+
+// Kiểm tra xem sách có quá hạn không
+const isOverdue = (request) => {
+  if (request.status === "returned") return false;
+
+  const today = new Date();
+  const dueDate = new Date(request.NgayTraDuKien);
+  return dueDate < today;
 };
 
 const loadApprovedRequests = async () => {
@@ -171,9 +220,34 @@ const loadApprovedRequests = async () => {
     console.log("🔐 Admin token exists:", !!adminStore.token);
 
     const response = await adminService.getApprovedBorrows(adminStore.token);
-    approvedRequests.value = response;
+
+    // Xử lý dữ liệu trả về: kiểm tra và cập nhật trạng thái quá hạn
+    approvedRequests.value = response.map((request) => {
+      // Nếu đã trả thì giữ nguyên trạng thái
+      if (request.status === "returned") {
+        return request;
+      }
+
+      // Nếu chưa trả, kiểm tra xem có quá hạn không
+      const today = new Date();
+      const dueDate = new Date(request.NgayTraDuKien);
+
+      if (dueDate < today) {
+        return { ...request, status: "overdue" };
+      }
+
+      return request;
+    });
 
     console.log("✅ Approved requests loaded:", approvedRequests.value.length);
+    console.log(
+      "📊 Request statuses:",
+      approvedRequests.value.map((r) => ({
+        id: r._id,
+        status: r.status,
+        returned: r.NgayTraThucTe,
+      }))
+    );
   } catch (err) {
     console.error("❌ Error loading approved requests:", err);
 
@@ -198,11 +272,30 @@ const markAsReturned = async (requestId) => {
     processingRequest.value = requestId;
     console.log("🔄 Marking as returned:", requestId);
 
-    await adminService.returnBorrow(adminStore.token, requestId);
+    // Gọi API đánh dấu đã trả
+    const updatedRequest = await adminService.returnBorrow(
+      adminStore.token,
+      requestId
+    );
 
+    console.log("✅ Request marked as returned:", updatedRequest);
     alert("✅ Đã đánh dấu sách đã được trả!");
 
-    await loadApprovedRequests();
+    // Cập nhật cục bộ thay vì tải lại toàn bộ
+    const index = approvedRequests.value.findIndex((r) => r._id === requestId);
+    if (index !== -1) {
+      // Cập nhật trạng thái và ngày trả thực tế
+      approvedRequests.value[index] = {
+        ...approvedRequests.value[index],
+        status: "returned",
+        NgayTraThucTe: new Date().toISOString(),
+      };
+
+      console.log("🔄 Locally updated request:", approvedRequests.value[index]);
+    }
+
+    // Hoặc tải lại toàn bộ danh sách nếu muốn
+    // await loadApprovedRequests();
   } catch (err) {
     console.error("❌ Error marking as returned:", err);
     alert(
@@ -257,5 +350,6 @@ onMounted(() => {
 
 .badge {
   font-size: 0.75rem;
+  padding: 0.35em 0.65em;
 }
 </style>

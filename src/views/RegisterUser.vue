@@ -17,7 +17,7 @@
                 <div class="row">
                   <div class="col-md-6 mb-3">
                     <label for="holot" class="form-label"
-                      >Họ lót <span class="text-danger">*</span></label
+                      >Họ <span class="text-danger">*</span></label
                     >
                     <div class="input-group">
                       <span class="input-group-text"
@@ -28,7 +28,7 @@
                         type="text"
                         class="form-control"
                         id="holot"
-                        placeholder="Nhập họ lót"
+                        placeholder="Nhập họ "
                         required
                       />
                     </div>
